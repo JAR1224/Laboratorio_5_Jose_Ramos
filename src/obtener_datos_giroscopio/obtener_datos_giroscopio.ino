@@ -1,5 +1,15 @@
 #include <Arduino_LSM9DS1.h>
-//#include <TensorFlowLite.h>
+#include <TensorFlowLite.h>
+
+#include "constants.h"
+#include "main_functions.h"
+#include "model.h"
+#include "output_handler.h"
+#include "tensorflow/lite/micro/all_ops_resolver.h"
+#include "tensorflow/lite/micro/micro_interpreter.h"
+#include "tensorflow/lite/micro/micro_log.h"
+#include "tensorflow/lite/micro/system_setup.h"
+#include "tensorflow/lite/schema/schema_generated.h"
 
 #define NUM_SAMPLES 70
 
@@ -26,6 +36,7 @@ void setup() {
   //Serial.println(" Hz");
 
   //delay(20000);
+
 
 }
 

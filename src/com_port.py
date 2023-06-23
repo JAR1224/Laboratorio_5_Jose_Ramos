@@ -1,33 +1,41 @@
 import serial
 import time
 from threading import Thread
+from threading import Event
 import numpy as np
 
 samples_per_gesture=70
-number_of_gestures=2
+number_of_gestures=100
 
-#f2 = open('train/gyro.csv','w')
-#f = open('train/accel.csv','w')
+ll = [0] * 100
+print(ll)
+ll = np.array(ll)
+print(ll)
+np.save('train/rest_output_noHot_0.npy',ll)
+
+exit()
+
+f = 'train/rest_accel_0.npy'
 
 serialPort = serial.Serial(
     port="COM3", baudrate=9600, bytesize=8, timeout=2, stopbits=serial.STOPBITS_ONE
 )
 
 def send_string(tok):
-    print("Thread started ",tok)
     while(1):
+        if event.is_set():
+            break
         strr_ = input()
         serialPort.write(bytes(strr_,'utf-8'))
-        #f2.write(strr_.strip('\n'))
+        print(event.is_set())
 
+event = Event()
 t = Thread(target=send_string, args=(1,) )
 t.start()
 
-#file_ = f
 count = 0
 accel_arr = np.array([[0.1,0.1,0.1]])
 gyro_arr = np.array([[0.1,0.1,0.1]])
-arr = accel_arr
 bin = False
 
 serialString = ""  # Used to hold data coming over UART
@@ -64,22 +72,12 @@ while 1:
         count=count+1
         print(count,strr)
         if (count == number_of_gestures*samples_per_gesture*2):
-            #arr1 = np.array(gyro_arr).astype(np.float)
-            #arr2 = np.array(accel_arr).astype(np.float)
-            #print(np.shape(gyro_arr[1:]))
-            #print(np.shape(accel_arr[1:]))
-            #print(gyro_arr)
-            #print("========+++=======")
-            #print(accel_arr)
-            print("===============")
-            #print(np.reshape(gyro_arr[1:],(number_of_gestures,samples_per_gesture,3)))
-            #np.save('train/punch_gyro.npy',np.reshape(gyro_arr[1:],(number_of_gestures,samples_per_gesture,3)).astype(np.float32))
 
-            np.save('train/punch_accel.npy',np.reshape(accel_arr[1:],(number_of_gestures,samples_per_gesture*2,3)))
+            np.save(f,np.reshape(accel_arr[1:],(number_of_gestures,samples_per_gesture*2,3)))
 
-            arr3 = np.load('train/punch_accel.npy')
-            print(arr3)
-            #arr4 = np.load('train/gyro.npy')
-            #print(arr4)
+            arr = np.load(f)
+            print(np.shape(arr))
+
+            event.set()
             t.join()
             exit()
