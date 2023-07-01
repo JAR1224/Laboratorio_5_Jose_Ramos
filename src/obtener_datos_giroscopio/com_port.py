@@ -1,57 +1,37 @@
 import serial
 import time
-from threading import Thread
-from threading import Event
 import numpy as np
 
-samples_per_gesture=70
+samples_per_gesture=140
 number_of_gestures=100
 
-ll = [0] * 100
-print(ll)
-ll = np.array(ll)
-print(ll)
-np.save('train/rest_output_noHot_0.npy',ll)
+gesture = 2 #knee
+gestures = ["punch","jump","knee"]
 
-exit()
-
-f = 'train/rest_accel_0.npy'
+f = gestures[gesture] + '_accel_0.npy'
 
 serialPort = serial.Serial(
     port="COM3", baudrate=9600, bytesize=8, timeout=2, stopbits=serial.STOPBITS_ONE
 )
-
-def send_string(tok):
-    while(1):
-        if event.is_set():
-            break
-        strr_ = input()
-        serialPort.write(bytes(strr_,'utf-8'))
-        print(event.is_set())
-
-event = Event()
-t = Thread(target=send_string, args=(1,) )
-t.start()
 
 count = 0
 accel_arr = np.array([[0.1,0.1,0.1]])
 gyro_arr = np.array([[0.1,0.1,0.1]])
 bin = False
 
-serialString = ""  # Used to hold data coming over UART
+serialString = "" 
 while 1:
-    # Wait until there is data waiting in the serial buffer
+    # Esperar hasta que lleguen datos seriales
     if serialPort.in_waiting > 0:
 
-        # Read data out of the buffer until a carraige return / new line is found
+        # Leer datos seriales hasta el caracter de nueva línea
         serialString = serialPort.readline()
-  
 
-        # Print the contents of the serial data
-
+        # Alternar entre datos de aceleración y datos de giroscopio
         bin = True if bin == False else False
         strr = serialString.decode("Ascii")
 
+        # Guardar datos de aceleración en arreglo
         if (bin):
             temp_arr=[]
             temp = strr.strip("\n").strip("\r").split(",")
@@ -60,17 +40,20 @@ while 1:
             temp_arr = [temp_arr]
             temp_arr = np.array(temp_arr).astype(np.float32)
             accel_arr =  np.concatenate((accel_arr,temp_arr))
+        # Guardar datos de giroscopio en arreglo
         else:
             temp_arr=[]
             temp = strr.strip("\n").strip("\r").split(",")
             for element in temp:
-                temp_arr.append((float(element)+2000)/40000)
+                temp_arr.append((float(element)+2000)/4000)
             temp_arr = [temp_arr]
             temp_arr = np.array(temp_arr).astype(np.float32)
             accel_arr =  np.concatenate((accel_arr,temp_arr))
 
         count=count+1
-        print(count,strr)
+        print(count/(samples_per_gesture*2),strr)
+
+        # Si ya se obtuvo todas las muestras esperadas, guardar en un archivo .npy
         if (count == number_of_gestures*samples_per_gesture*2):
 
             np.save(f,np.reshape(accel_arr[1:],(number_of_gestures,samples_per_gesture*2,3)))
@@ -78,6 +61,8 @@ while 1:
             arr = np.load(f)
             print(np.shape(arr))
 
-            event.set()
-            t.join()
+            # Guardar en otro archivo .npy las salidas
+            ll = [gesture] * number_of_gestures
+            ll = np.array(ll)
+            np.save(gestures[gesture] + '_output_noHot_0.npy',ll)
             exit()

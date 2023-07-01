@@ -1,72 +1,119 @@
 #include <Arduino_LSM9DS1.h>
-#include <TensorFlowLite.h>
 
-#include "constants.h"
-#include "main_functions.h"
-#include "model.h"
-#include "output_handler.h"
-#include "tensorflow/lite/micro/all_ops_resolver.h"
-#include "tensorflow/lite/micro/micro_interpreter.h"
-#include "tensorflow/lite/micro/micro_log.h"
-#include "tensorflow/lite/micro/system_setup.h"
-#include "tensorflow/lite/schema/schema_generated.h"
+#define NUM_SAMPLES 140
+#define ACTIVITY_THRESHOLD 0.35
+#define BUFFER_SIZE 20
 
-#define NUM_SAMPLES 70
+// Función de valor absoluto
+float abs_(float x) { return ((x)>0?(x):-(x)); }
 
+//Declaración de variables
 float aX, aY, aZ;
 float gX, gY, gZ;
-int samples_per_gesture = NUM_SAMPLES;
+float data[(NUM_SAMPLES-BUFFER_SIZE)*6];
+float buffer[BUFFER_SIZE*6];
+float sum_ = 0;
+int data_index = 0;
+int buffer_index = 0;
+int start_recording = 0;
 
 void setup() {
+  //Inicializar communicación serial
   Serial.begin(9600);
   while (!Serial);
 
-  // initialize the IMU
   if (!IMU.begin()) {
     Serial.println("Failed to initialize IMU!");
     while (1);
   }
 
-  // print out the samples rates of the IMUs
-  //Serial.print("Accelerometer sample rate = ");
-  //Serial.print(IMU.accelerationSampleRate());
-  //Serial.println(" Hz");
-  //Serial.print("Gyroscope sample rate = ");
-  //Serial.print(IMU.gyroscopeSampleRate());
-  //Serial.println(" Hz");
-
-  //delay(20000);
+  //Leer el primer dato del giroscopio
+  if (IMU.accelerationAvailable() && IMU.gyroscopeAvailable()) {
+      IMU.readAcceleration(aX, aY, aZ);
+      IMU.readGyroscope(gX, gY, gZ);
+  }
+  delay(100);
 
 
 }
 
 void loop() {
-  if (samples_per_gesture == NUM_SAMPLES) {
-    if (Serial.available() > 0) {
-      Serial.read();
-      samples_per_gesture=0;
-      delay(1000);
-    }
-  } else {
+  
+  //Esperar hasta que haya suficiente actividad en el giroscopio
+  if (sum_ > ACTIVITY_THRESHOLD) {
+    start_recording = 1;
+    sum_ = 0;
+  }
 
-    if (IMU.accelerationAvailable()) {
+  //Mientras no haya suficiente actividad:
+  if (start_recording == 0) {
+    if (buffer_index == BUFFER_SIZE*6) {
+      buffer_index = 0;
+    }
+    if (IMU.accelerationAvailable() && IMU.gyroscopeAvailable()) {
+      //Leer, normalizar y sumar datos del giroscopio. Guardar datos en un buffer
       IMU.readAcceleration(aX, aY, aZ);
-      Serial.print(aX);
-      Serial.print(",");
-      Serial.print(aY);
-      Serial.print(",");
-      Serial.println(aZ);
-    }
-
-    if (IMU.gyroscopeAvailable()) {
       IMU.readGyroscope(gX, gY, gZ);
-      Serial.print(gX);
-      Serial.print(",");
-      Serial.print(gY);
-      Serial.print(",");
-      Serial.println(gZ);
+      sum_ = 0;
+      buffer[buffer_index] = aX;
+      sum_ += abs_(buffer[buffer_index++])/4;
+      buffer[buffer_index] = aY;
+      sum_ += abs_(buffer[buffer_index++])/4;
+      buffer[buffer_index] = aZ;
+      sum_ += abs_(buffer[buffer_index++])/4;
+      buffer[buffer_index] = gX;
+      sum_ += abs_(buffer[buffer_index++])/2000;
+      buffer[buffer_index] = gY;
+      sum_ += abs_(buffer[buffer_index++])/2000;
+      buffer[buffer_index] = gZ;
+      sum_ += abs_(buffer[buffer_index++])/2000;
     }
-    samples_per_gesture++;
+  //Si se detecta suficiente actividad:
+  } else if (start_recording == 1) {
+    if (IMU.accelerationAvailable() && IMU.gyroscopeAvailable()) {
+      //Leer y guardar datos del giroscopio en arreglo
+      IMU.readAcceleration(aX, aY, aZ);
+      IMU.readGyroscope(gX, gY, gZ);
+      data[data_index++] = aX;
+      data[data_index++] = aY;
+      data[data_index++] = aZ;
+      data[data_index++] = gX;
+      data[data_index++] = gY;
+      data[data_index++] = gZ;
+      if (data_index == (NUM_SAMPLES-BUFFER_SIZE)*6) {
+        //Después de obtener todas las muestras, mandar el buffer y el arreglo a la PC serialmente
+        data_index = 0;
+        for (int i = 0 ; i < BUFFER_SIZE ; i++) {
+          if (buffer_index == BUFFER_SIZE*6) {
+            buffer_index = 0;
+          }
+          Serial.print(buffer[buffer_index++]);
+          Serial.print(",");
+          Serial.print(buffer[buffer_index++]);
+          Serial.print(",");
+          Serial.println(buffer[buffer_index++]);
+          Serial.print(buffer[buffer_index++]);
+          Serial.print(",");
+          Serial.print(buffer[buffer_index++]);
+          Serial.print(",");
+          Serial.println(buffer[buffer_index++]);
+        }
+        for (int j = 0 ; j < (NUM_SAMPLES-BUFFER_SIZE) ; j++) {
+          Serial.print(data[data_index++]);
+          Serial.print(",");
+          Serial.print(data[data_index++]);
+          Serial.print(",");
+          Serial.println(data[data_index++]);
+          Serial.print(data[data_index++]);
+          Serial.print(",");
+          Serial.print(data[data_index++]);
+          Serial.print(",");
+          Serial.println(data[data_index++]);
+        }
+        data_index = 0;
+        start_recording = 0;
+      }
+    }
   }
 
 }

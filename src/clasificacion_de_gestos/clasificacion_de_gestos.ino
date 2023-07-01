@@ -11,25 +11,38 @@
 #include "tensorflow/lite/micro/system_setup.h"
 #include "tensorflow/lite/schema/schema_generated.h"
 
-#define NUM_SAMPLES 70
+#define NUM_SAMPLES 140
+#define ACTIVITY_THRESHOLD 0.35
+#define BUFFER_SIZE 20
+
+// Función de valor absoluto
+float abs_(float x) { return ((x)>0?(x):-(x)); }
 
 namespace {
 const tflite::Model* model = nullptr;
 tflite::MicroInterpreter* interpreter = nullptr;
 TfLiteTensor* input = nullptr;
 TfLiteTensor* output = nullptr;
-int inference_count = 0;
+//int inference_count = 0;
 
 constexpr int kTensorArenaSize = 60 * 1024;
-// Keep aligned to 16 bytes for CMSIS
-alignas(16) uint8_t tensor_arena[kTensorArenaSize];
-}  // namespace
 
+alignas(16) uint8_t tensor_arena[kTensorArenaSize];
+}  
+
+//Declaración de variables
 float aX, aY, aZ;
 float gX, gY, gZ;
-int samples_per_gesture = 0;
+float data[(NUM_SAMPLES-BUFFER_SIZE)*6];
+float buffer[BUFFER_SIZE*6];
+float sum_ = 0;
+int data_index = 0;
+int buffer_index = 0;
+int start_recording = 0;
+int input_index = 0;
 
 void setup() {
+  // Inicializar comunicación serial con la PC
   Serial.begin(9600);
   while (!Serial);
 
@@ -38,16 +51,6 @@ void setup() {
     Serial.println("Failed to initialize IMU!");
     while (1);
   }
-
-  // print out the samples rates of the IMUs
-  //Serial.print("Accelerometer sample rate = ");
-  //Serial.print(IMU.accelerationSampleRate());
-  //Serial.println(" Hz");
-  //Serial.print("Gyroscope sample rate = ");
-  //Serial.print(IMU.gyroscopeSampleRate());
-  //Serial.println(" Hz");
-
-  //delay(20000);
 
   tflite::InitializeTarget();
 
@@ -61,7 +64,6 @@ void setup() {
   }
 
   // This pulls in all the operation implementations we need.
-  // NOLINTNEXTLINE(runtime-global-variables)
   static tflite::AllOpsResolver resolver;
 
   // Build an interpreter to run the model with.
@@ -77,72 +79,90 @@ void setup() {
     return;
   }
 
-  // Obtain pointers to the model's input and output tensors.
   input = interpreter->input(0);
   output = interpreter->output(0);
 
-  // Keep track of how many inferences we have performed.
-  inference_count = 0;
-
 }
 
-float gest_1,gest_2;
-int condition;
-
 void loop() {
-  if (samples_per_gesture == NUM_SAMPLES) {
 
-    if (Serial.available() > 0) {
-      Serial.read();
-      samples_per_gesture=0;
+  //Esperar hasta que haya suficiente actividad en el giroscopio
+  if (sum_ > ACTIVITY_THRESHOLD) {
+    start_recording = 1;
+    sum_ = 0;
+  }
 
-      TfLiteStatus invokeStatus = interpreter->Invoke();
-      if (invokeStatus != kTfLiteOk) {
-        Serial.println("Invoke failed!");
-        while (1);
-        return;
-      }
-
-      // Loop through the output tensor values from the model
-      //for (int i = 0; i < 2; i++) {
-        //Serial.print(GESTURES[i]);
-      //  Serial.print(": ");
-      //  Serial.println(output->data.f[i], 6);
-      //}
-      Serial.println(output->data.f[0] > output->data.f[1] ? "estacionario" : "punetazo");
-
-      delay(1000);
+  //Mientras no haya suficiente actividad:
+  if (start_recording == 0) {
+    if (buffer_index == BUFFER_SIZE*6) {
+      buffer_index = 0;
     }
-
-  } else {
-
-    if (IMU.accelerationAvailable()) {
+    if (IMU.accelerationAvailable() && IMU.gyroscopeAvailable()) {
+      //Leer, normalizar y sumar datos del giroscopio. Guardar datos en un buffer
       IMU.readAcceleration(aX, aY, aZ);
-      Serial.print(aX);
-      Serial.print(",");
-      Serial.print(aY);
-      Serial.print(",");
-      Serial.println(aZ);
-    }
-
-    if (IMU.gyroscopeAvailable()) {
       IMU.readGyroscope(gX, gY, gZ);
-      Serial.print(gX);
-      Serial.print(",");
-      Serial.print(gY);
-      Serial.print(",");
-      Serial.println(gZ);
+      sum_ = 0;
+      buffer[buffer_index] = aX;
+      sum_ += abs_(buffer[buffer_index++])/4;
+      buffer[buffer_index] = aY;
+      sum_ += abs_(buffer[buffer_index++])/4;
+      buffer[buffer_index] = aZ;
+      sum_ += abs_(buffer[buffer_index++])/4;
+      buffer[buffer_index] = gX;
+      sum_ += abs_(buffer[buffer_index++])/2000;
+      buffer[buffer_index] = gY;
+      sum_ += abs_(buffer[buffer_index++])/2000;
+      buffer[buffer_index] = gZ;
+      sum_ += abs_(buffer[buffer_index++])/2000;
     }
-
-    input->data.f[samples_per_gesture * 6 + 0] = (aX + 4.0) / 8.0;
-    input->data.f[samples_per_gesture * 6 + 1] = (aY + 4.0) / 8.0;
-    input->data.f[samples_per_gesture * 6 + 2] = (aZ + 4.0) / 8.0;
-    input->data.f[samples_per_gesture * 6 + 3] = (gX + 2000.0) / 40000.0;
-    input->data.f[samples_per_gesture * 6 + 4] = (gY + 2000.0) / 40000.0;
-    input->data.f[samples_per_gesture * 6 + 5] = (gZ + 2000.0) / 40000.0;
-
-    samples_per_gesture++;
-
+  //Si se detecta suficiente actividad:
+  } else if (start_recording == 1) {
+    if (IMU.accelerationAvailable() && IMU.gyroscopeAvailable()) {
+      //Leer y guardar datos del giroscopio en arreglo
+      IMU.readAcceleration(aX, aY, aZ);
+      IMU.readGyroscope(gX, gY, gZ);
+      data[data_index++] = aX;
+      data[data_index++] = aY;
+      data[data_index++] = aZ;
+      data[data_index++] = gX;
+      data[data_index++] = gY;
+      data[data_index++] = gZ;
+      if (data_index == (NUM_SAMPLES-BUFFER_SIZE)*6) {
+        //Después de obtener todas las muestras (buffer + arreglo), realizar la inferencia y mandar resultados a la PC
+        data_index = 0;
+        input_index = 0;
+        for (int i = 0 ; i < BUFFER_SIZE ; i++) {
+          if (buffer_index == BUFFER_SIZE*6) {
+            buffer_index = 0;
+          }
+          input->data.f[input_index * 6 + 0] = (buffer[buffer_index++] + 4.0) / 8.0;
+          input->data.f[input_index * 6 + 1] = (buffer[buffer_index++] + 4.0) / 8.0;
+          input->data.f[input_index * 6 + 2] = (buffer[buffer_index++] + 4.0) / 8.0;
+          input->data.f[input_index * 6 + 3] = (buffer[buffer_index++] + 2000.0) / 4000.0;
+          input->data.f[input_index * 6 + 4] = (buffer[buffer_index++] + 2000.0) / 4000.0;
+          input->data.f[input_index * 6 + 5] = (buffer[buffer_index++] + 2000.0) / 4000.0;
+          input_index++;
+        }
+        for (int j = 0 ; j < (NUM_SAMPLES-BUFFER_SIZE) ; j++) {
+          input->data.f[input_index * 6 + 0] = (data[data_index++] + 4.0) / 8.0;
+          input->data.f[input_index * 6 + 1] = (data[data_index++] + 4.0) / 8.0;
+          input->data.f[input_index * 6 + 2] = (data[data_index++] + 4.0) / 8.0;
+          input->data.f[input_index * 6 + 3] = (data[data_index++] + 2000.0) / 4000.0;
+          input->data.f[input_index * 6 + 4] = (data[data_index++] + 2000.0) / 4000.0;
+          input->data.f[input_index * 6 + 5] = (data[data_index++] + 2000.0) / 4000.0;
+          input_index++;
+        }
+        data_index = 0;
+        start_recording = 0;
+        TfLiteStatus invokeStatus = interpreter->Invoke();
+        if (invokeStatus != kTfLiteOk) {
+          Serial.println("Invoke failed!");
+          while (1);
+          return;
+        }
+        Serial.println(output->data.f[0] > output->data.f[1] ? ( output->data.f[0] > output->data.f[2] ? "punetazo" : "rodilla" ) : ( output->data.f[1] > output->data.f[2] ? "salto" : "ropdilla" ) );
+      }
+    }
   }
 
 }
