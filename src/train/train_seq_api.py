@@ -1,6 +1,5 @@
 import tensorflow as tf
 from tensorflow.keras import layers
-from tensorflow.keras.datasets import mnist
 import numpy as np
 
 nohot = True
@@ -57,11 +56,11 @@ model = tf.keras.Sequential (
 model.compile(
 	loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
 	optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001),
-	metrics=["mae"],
+	metrics=["accuracy"],
 )
 
 #Entrenar modelo
-model.fit(x_train,y_train,batch_size=1,epochs=280)
+model.fit(x_train,y_train,batch_size=1,epochs=150)
 
 #Validar y realizar pruebas
 model.evaluate(x_test,y_test, batch_size=1)
